@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Framecut image integration checks</title>
+<style>body{font:16px system-ui;background:#202127;color:#eee;padding:24px}canvas{border:1px solid #777;margin:8px}pre{white-space:pre-wrap}</style>
+<h1>Image import and MP4 export checks</h1>
+<p>Run using Vite with a temporary FRAMECUT_DATA_DIR. This creates test media and one saved project.</p>
+<button id="run">Run image checks</button>
+<pre id="results"></pre>
+<div id="frames"></div>
+<script type="module">
+import { ClientMedia } from '/src/clientMedia.ts'
+const media = new ClientMedia()
+import { inspectSource } from '/src/media.ts'
+import { emptyProject, uid } from '/src/model.ts'
+import { uploadSource, writeProject, readProject } from '/src/storage.ts'
+import { renderMp4 } from '/src/export.ts'
+import { Input, BlobSource, MP4, VideoSampleSink } from 'mediabunny'
+
+const results = document.querySelector('#results')
+const report = message => { results.textContent += message + '\n' }
+const assert = (condition, message) => { if (!condition) throw Error(message) }
+async function fixture(name, width, height, color, transparent = false) {
+  const canvas = document.createElement('canvas')
+  canvas.width = width; canvas.height = height
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = color; ctx.fillRect(0, 0, width, height)
+  if (transparent) ctx.clearRect(width / 4, height / 4, width / 2, height / 2)
+  const blob = await new Promise(resolve => canvas.toBlob(resolve))
+  return inspectSource(await uploadSource(new File([blob], name, { type: 'image/png' })), media)
+}
+document.querySelector('#run').onclick = async event => {
+  event.target.disabled = true
+  try {
+    const red = await fixture('background.png', 320, 180, '#ff0000')
+    const green = await fixture('portrait.png', 90, 180, '#00ff00', true)
+    const blue = await fixture('wide.png', 320, 80, '#0000ff')
+    assert(green.kind === 'image' && green.width === 90 && green.height === 180 && green.duration === 5 && !green.hasAudio && green.thumbnail, 'Image inspection failed')
+    report('PASS: upload, decode, dimensions, thumbnail, five-second default')
+    const project = { ...emptyProject(), name: 'Image verification', width: 320, height: 180, frameRate: 24, assets: [red, green, blue], clips: [
+      { id: uid(), assetId: red.id, trackId: 'V1', start: 0.5, in: 0, out: 8.5 },
+      { id: uid(), assetId: green.id, trackId: 'V2', start: 1, in: 0, out: 2 },
+      { id: uid(), assetId: blue.id, trackId: 'V2', start: 5, in: 7, out: 9 },
+    ] }
+    const saved = await writeProject(uid(), 0, project)
+    const restored = await media.loadProject((await readProject(saved.id)).project)
+    assert(restored.clips[0].out === 8.5 && restored.assets.every(a => a.url), 'Save/reopen failed')
+    report('PASS: save and reopen image clips beyond the default duration')
+    const blob = await renderMp4(restored, () => {})
+    const input = new Input({ source: new BlobSource(blob), formats: [MP4] })
+    try {
+      assert(Math.abs(await input.computeDuration() - 9) < 0.1, 'Incorrect exported duration')
+      const sink = new VideoSampleSink(await input.getPrimaryVideoTrack())
+      async function frame(time, checks) {
+        const sample = await sink.getSample(time)
+        const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180
+        const ctx = canvas.getContext('2d'); sample.draw(ctx, 0, 0, 320, 180); sample.close()
+        document.querySelector('#frames').append(canvas)
+        for (const [x, y, expected] of checks) {
+          const actual = ctx.getImageData(x, y, 1, 1).data
+          assert(expected.every((v, i) => Math.abs(v - actual[i]) < 25), `Frame ${time}s pixel ${x},${y}: ${[...actual]} expected ${expected}`)
+        }
+      }
+      await frame(0.1, [[160, 90, [0, 0, 0]]])
+      await frame(0.75, [[160, 90, [255, 0, 0]]])
+      await frame(2, [[120, 90, [0, 255, 0]], [160, 90, [255, 0, 0]], [20, 90, [255, 0, 0]], [160, 5, [0, 255, 0]]])
+      await frame(6, [[160, 90, [0, 0, 255]], [160, 20, [255, 0, 0]], [5, 90, [0, 0, 255]]])
+      await frame(8.5, [[160, 90, [255, 0, 0]]])
+      report('PASS: MP4 duration, gaps, portrait/wide containment, transparency, overlays, long still duration')
+    } finally { input.dispose() }
+    const solo = await renderMp4({ ...restored, clips: [{ ...restored.clips[1], start: 0, in: 0, out: 0.5 }] }, () => {})
+    assert(solo.size > 0, 'Single-image export failed')
+    const marked = await renderMp4({ ...restored, exportStart: 6, exportEnd: 7 }, () => {}, ['V2'])
+    const check = new Input({ source: new BlobSource(marked), formats: [MP4] })
+    try { assert(Math.abs(await check.computeDuration() - 1) < 0.1, 'Marked duration failed') } finally { check.dispose() }
+    report('PASS: single-image export and marked-range export with hidden image track')
+    report('ALL IMAGE CHECKS PASSED')
+  } catch (error) { report('FAIL: ' + error.stack) }
+}
+</script>
