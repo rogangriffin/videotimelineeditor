@@ -54,10 +54,10 @@ export function renderPlan(timeline, media) {
   }
   // Cuts use concatenated segments instead of compositing every layer on every
   // frame. Keep frames in YUV; reserve RGBA for timelines needing transparency.
-  if (!cutsOnly) filters.push(`color=c=black:s=${width}x${height}:r=${fps}:d=${number(duration)},format=rgba[base]`)
+  if (!cutsOnly) filters.push(`color=c=black:s=${width}x${height}:r=${fps},trim=end_frame=${frame(duration)},format=rgba[base]`)
   for (const c of [...(cutsOnly ? chronological : videoClips), ...timeline.clips.filter(c => c.trackId.startsWith('A'))]) {
     const source = media.get(c.assetId), image = source.asset.kind === 'image', video = c.trackId.startsWith('V')
-    if (video && cutsOnly && frame(endOf(c)) <= frame(c.start)) continue
+    if (video && frame(endOf(c)) <= frame(c.start)) continue
     const stream = source.info.streams.find(s => s.codec_type === (video ? 'video' : 'audio'))
     if (!stream) throw new Error(`${source.asset.name} has no ${video ? 'video' : 'audio'} stream for ${c.trackId}.`)
     const length = c.out - c.in, index = input++
@@ -77,9 +77,13 @@ export function renderPlan(timeline, media) {
         segments.push(`[${label}]`); cursor = last
         continue
       }
-      filters.push(`[${index}:v:0]${timing},${fit},format=rgba,setpts=PTS+${number(c.start)}/TB[v${index}]`)
+      const first = frame(c.start), last = frame(endOf(c))
+      // Put every layer on the sequence's frame grid. Keep one extra cloned
+      // frame past its visible window so framesync cannot expose the background
+      // early at EOF when source and sequence frame rates differ.
+      filters.push(`[${index}:v:0]${timing},${fit},format=rgba,tpad=stop_mode=clone:stop_duration=1,fps=${fps}:start_time=0,trim=end_frame=${last - first + 1},settb=1/${fps},setpts=PTS-STARTPTS+${first}[v${index}]`)
       const next = `layer${index}`
-      filters.push(`[${layer}][v${index}]overlay=x=(W-w)/2:y=(H-h)/2:eof_action=pass:repeatlast=0:format=auto:enable='gte(t,${number(c.start)})*lt(t,${number(endOf(c))})'[${next}]`)
+      filters.push(`[${layer}][v${index}]overlay=x=(W-w)/2:y=(H-h)/2:eof_action=pass:repeatlast=0:format=auto:enable='gte(t*${fps},${first}-0.0001)*lt(t*${fps},${last}-0.0001)'[${next}]`)
       layer = next
     } else {
       filters.push(`[${index}:a:0]atrim=duration=${number(length)},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,adelay=${Math.round(c.start * 48000)}S:all=1[a${index}]`)

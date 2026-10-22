@@ -1,0 +1,3 @@
+import { ADTS, FLAC, MATROSKA, MP3, MP4, OGG, QTFF, WAVE, WEBM } from 'mediabunny'
+
+export const MEDIA_FORMATS = [MP4, QTFF, WEBM, MATROSKA, MP3, WAVE, OGG, FLAC, ADTS]

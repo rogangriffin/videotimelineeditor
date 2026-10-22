@@ -1,10 +1,11 @@
-import { ADTS, FLAC, MATROSKA, MP3, MP4, OGG, QTFF, WAVE, WEBM, BlobSource, Input, VideoSampleSink } from 'mediabunny'
+import { BlobSource, Input, VideoSampleSink } from 'mediabunny'
 import type { Asset } from './model'
 import { DEFAULT_IMAGE_DURATION, IMAGE_EXTENSIONS, fitRect, uid } from './model'
 import type { SourceRecord } from './storage'
 import { ClientMedia, type MediaProgress } from './clientMedia'
 
-export const MEDIA_FORMATS = [MP4, QTFF, WEBM, MATROSKA, MP3, WAVE, OGG, FLAC, ADTS]
+import { MEDIA_FORMATS } from './mediaFormats'
+export { MEDIA_FORMATS } from './mediaFormats'
 
 export const mediaSource = (asset: Asset) => {
   if (!asset.file) throw new Error(`${asset.name} must finish loading into the browser first.`)

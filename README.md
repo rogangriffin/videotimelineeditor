@@ -28,7 +28,9 @@ Open `http://127.0.0.1:4173`. `npm run preview` also serves the built app with i
 
 - Import video, audio, or images into the media bin, then drag them onto the timeline or double-click to append them.
 - Use two video tracks (`V1`, `V2`) and two audio tracks (`A1`, `A2`). Video with audio creates linked clips that move, trim, and split together.
+- Right-click a linked shot and choose **Unlink Audio** to edit its video and audio independently. Both clips stay in place, and unlinking supports undo/redo.
 - Drag clips to move them, drag their edges to trim, and use the razor or split command to cut. Snapping, track locking, track visibility/muting, and undo/redo are available.
+- Audio clips show waveforms from their source audio, including audio linked to video. Analysis runs in a background worker when clips become visible. Shared peak data follows trims and splits, persists in the browser cache, and renders only the visible portion at the current zoom. Silence and relative amplitudes are preserved; unavailable decoders show **Waveform unavailable**.
 - Import PNG, JPEG, WebP, GIF, BMP, and AVIF images. Stills start at five seconds and can be extended without a source-duration limit. Animated images use their first frame. Images fit within the sequence while preserving aspect ratio and transparency when composited.
 - Click or drag the ruler to seek. Use **Sequence settings** to choose dimensions and a frame rate of 24, 25, 30, or 60 fps. The first video added to an untouched, empty sequence sets its dimensions when within the supported size limits, and selects the nearest supported frame rate.
 
@@ -59,7 +61,7 @@ Moved, removed, or changed source files appear offline. Use **Find file** to loc
 
 ## MP4 export
 
-1. Optionally right-click the timeline and choose **Mark Export Start** and **Mark Export End**. Both markers are required to restrict the export range; otherwise the full sequence is exported. Markers snap to frames, support undo/redo, and save with the project.
+1. Optionally right-click the timeline's time ruler and choose **Mark Export Start** and **Mark Export End**. Both markers are required to restrict the export range; otherwise the full sequence is exported. Markers snap to frames, support undo/redo, and save with the project.
 2. Click **Export MP4**, then **Render** in the exports dialog. The job captures the current sequence and track visibility, including unsaved edits. Hidden video and muted audio tracks are excluded.
 3. Follow progress in the dialog. Completed files are saved in `data/exports/` and can also be downloaded using **Download MP4**.
 
@@ -124,6 +126,7 @@ Visit these paths on the Vite server and click their run buttons:
 
 - `/tests/browser-images.html`: image import, fitting, save/reopen, and browser-rendered MP4 pixel checks.
 - `/tests/browser-client-media.html`: complete media loading, preview pixels, decoded audio, readiness, clip transitions, and playback stability with subsequent server media requests blocked.
+- `/tests/browser-waveforms.html`: real WAV and embedded AAC peaks, stereo phase, silence, transients, persistent cache reuse, source offsets, zoom, playback repaint avoidance, and bounded canvas rendering for long clips.
 
 These pages create test media and saved projects. They also exercise the browser renderer retained in `src/export.ts`; the editor's **Export MP4** button uses the server queue.
 

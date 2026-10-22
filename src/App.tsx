@@ -17,10 +17,12 @@ import { registerSource, uploadSource, readProject, writeProject } from './stora
 import { DiskBrowser, ProjectBrowser } from './StorageDialogs'
 import { ClientMedia } from './clientMedia'
 import { PlaybackTransport } from './playback'
+import { AudioWaveform } from './AudioWaveform'
 
 type Tool = 'select' | 'razor'
 type DragMode = 'move' | 'trim-start' | 'trim-end'
 type DragState = { mode: DragMode; clip: Clip; linked?: Clip; x: number; current: Clip[]; moved: boolean }
+type TimelineMenu = { x: number; y: number } & ({ kind: 'ruler'; time: number } | { kind: 'clip'; clipId: string })
 
 function StillImage({ url, name, className }: { url: string; name: string; className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
@@ -133,7 +135,7 @@ export default function App() {
   const [mutedTracks, setMutedTracks] = useState<TrackId[]>([])
   const [lockedTracks, setLockedTracks] = useState<TrackId[]>([])
   const [showProperties, setShowProperties] = useState(false)
-  const [timelineMenu, setTimelineMenu] = useState<{ x: number; y: number; time: number } | null>(null)
+  const [timelineMenu, setTimelineMenu] = useState<TimelineMenu | null>(null)
   const timelineMenuRef = useRef<HTMLDivElement>(null)
   const relinkInput = useRef<HTMLInputElement>(null)
   const relinkTarget = useRef<string | null>(null)
@@ -196,6 +198,9 @@ export default function App() {
     ? { left: exportStart * zoom, width: (exportEnd - exportStart) * zoom } : undefined
   const selectedAsset = project.assets.find(a => a.id === selectedAssetId)
   const selectedClip = project.clips.find(c => c.id === selectedClipId)
+  const menuClip = timelineMenu?.kind === 'clip' ? project.clips.find(c => c.id === timelineMenu.clipId) : undefined
+  const menuLinkedClip = menuClip?.linkedId ? project.clips.find(c => c.id === menuClip.linkedId) : undefined
+  const canUnlinkAudio = !!menuClip && !!menuLinkedClip && !lockedTracks.includes(menuClip.trackId) && !lockedTracks.includes(menuLinkedClip.trackId)
   const unresolved = project.assets.filter(a => !a.url)
   const shownClips = dragDraft ?? project.clips
   const timelineWidth = Math.max(1200, (Math.max(duration, 30) + 12) * zoom)
@@ -205,7 +210,9 @@ export default function App() {
   useEffect(() => { if (!playing) playheadRef.current = playhead }, [playhead, playing])
   useEffect(() => {
     if (!timelineMenu) return
-    timelineMenuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    const menu = timelineMenuRef.current
+    const focusTarget = menu?.querySelector<HTMLButtonElement>('button:not(:disabled)') ?? menu
+    focusTarget?.focus()
     const dismiss = () => setTimelineMenu(null)
     const outside = (event: PointerEvent) => {
       if (!timelineMenuRef.current?.contains(event.target as Node)) dismiss()
@@ -361,6 +368,13 @@ export default function App() {
     const ids = [selectedClip.id, selectedClip.linkedId].filter(Boolean)
     commit(previous => ({ ...previous, clips: previous.clips.filter(c => !ids.includes(c.id)) }))
     setSelectedClipId(null)
+  }
+
+  const unlinkAudio = () => {
+    if (!canUnlinkAudio || !menuClip || !menuLinkedClip) return
+    const ids = [menuClip.id, menuLinkedClip.id]
+    commit(previous => ({ ...previous, clips: previous.clips.map(clip => ids.includes(clip.id) ? { ...clip, linkedId: undefined } : clip) }))
+    setTimelineMenu(null)
   }
 
   const splitAt = (id: string, at: number) => {
@@ -711,12 +725,13 @@ export default function App() {
         <div className="timeline-body">
           <div className="track-sidebar"><div className="sidebar-ruler"><span>TRACKS</span><GripVertical size={14} /></div>{TRACKS.map(track => <div key={track} className={`track-header ${track.startsWith('A') ? 'audio' : ''}`}><div className="track-id">{track.startsWith('V') ? <Film size={14} /> : <Music2 size={14} />}<strong>{track}</strong></div><div className="track-actions"><button title={mutedTracks.includes(track) ? track.startsWith('V') ? 'Show track' : 'Unmute track' : track.startsWith('V') ? 'Hide track' : 'Mute track'} className={mutedTracks.includes(track) ? 'active' : ''} onClick={() => setMutedTracks(current => current.includes(track) ? current.filter(x => x !== track) : [...current, track])}>{track.startsWith('V') ? mutedTracks.includes(track) ? <EyeOff size={14} /> : <Eye size={14} /> : mutedTracks.includes(track) ? <VolumeX size={14} /> : <Volume2 size={14} />}</button><button title={lockedTracks.includes(track) ? 'Unlock track' : 'Lock track'} className={lockedTracks.includes(track) ? 'active' : ''} onClick={() => setLockedTracks(current => current.includes(track) ? current.filter(x => x !== track) : [...current, track])}>{lockedTracks.includes(track) ? '●' : '○'}</button></div></div>)}</div>
           <div className="timeline-scroll" ref={timelineScroll} tabIndex={-1}>
-            <div className="timeline-content" style={{ width: timelineWidth }} onContextMenu={event => {
-              event.preventDefault()
-              const time = Math.max(0, Math.min(duration, Math.round((event.clientX - event.currentTarget.getBoundingClientRect().left) / zoom * project.frameRate) / project.frameRate))
-              setTimelineMenu({ x: Math.max(8, Math.min(event.clientX, window.innerWidth - 220)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 124)), time })
-            }}>
-              <div className="ruler" onPointerDown={event => {
+            <div className="timeline-content" style={{ width: timelineWidth }}>
+              <div className="ruler" onContextMenu={event => {
+                event.preventDefault()
+                event.stopPropagation()
+                const time = Math.max(0, Math.min(duration, Math.round((event.clientX - event.currentTarget.getBoundingClientRect().left) / zoom * project.frameRate) / project.frameRate))
+                setTimelineMenu({ kind: 'ruler', x: Math.max(8, Math.min(event.clientX, window.innerWidth - 220)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 124)), time })
+              }} onPointerDown={event => {
                 if (event.button !== 0) return
                 const rect = event.currentTarget.getBoundingClientRect()
                 seek((event.clientX - rect.left) / zoom)
@@ -730,10 +745,15 @@ export default function App() {
                 {shownClips.filter(c => c.trackId === track).map(clip => {
                   const asset = project.assets.find(a => a.id === clip.assetId)
                   const clipWidth = Math.max(3, durationOf(clip) * zoom)
-                  return <div key={clip.id} className={`timeline-clip ${track.startsWith('A') ? 'audio-clip' : 'video-clip'} ${selectedClipId === clip.id ? 'selected' : ''} ${!asset?.url ? 'missing' : ''}`} style={{ left: clip.start * zoom, width: clipWidth, backgroundImage: track.startsWith('V') && asset?.thumbnail ? `linear-gradient(90deg, rgba(26,20,39,.4), rgba(35,25,51,.22)), url(${asset.thumbnail})` : undefined }} onPointerDown={e => beginClipPointer(e, clip, 'move')} title={`${asset?.name ?? 'Missing media'}\n${timecode(clip.in)} – ${timecode(clip.out)}`}>
+                  return <div key={clip.id} className={`timeline-clip ${track.startsWith('A') ? 'audio-clip' : 'video-clip'} ${selectedClipId === clip.id ? 'selected' : ''} ${!asset?.url ? 'missing' : ''}`} style={{ left: clip.start * zoom, width: clipWidth, backgroundImage: track.startsWith('V') && asset?.thumbnail ? `linear-gradient(90deg, rgba(26,20,39,.4), rgba(35,25,51,.22)), url(${asset.thumbnail})` : undefined }} onPointerDown={e => beginClipPointer(e, clip, 'move')} onContextMenu={event => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setSelectedClipId(clip.id)
+                    setTimelineMenu({ kind: 'clip', clipId: clip.id, x: Math.max(8, Math.min(event.clientX, window.innerWidth - 220)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 48)) })
+                  }} title={`${asset?.name ?? 'Missing media'}\n${timecode(clip.in)} – ${timecode(clip.out)}`}>
                     <div className="clip-handle left" onPointerDown={e => beginClipPointer(e, clip, 'trim-start')} />
                     <div className="clip-inner">{track.startsWith('V') ? <Film size={13} /> : <AudioLines size={14} />}<span>{asset?.name ?? 'Missing media'}</span>{clip.linkedId && <Link2 size={11} />}</div>
-                    {track.startsWith('A') && <div className="waveform" aria-hidden="true" />}
+                    {track.startsWith('A') && asset && <AudioWaveform asset={asset} sourceIn={clip.in} sourceOut={clip.out} start={clip.start} zoom={zoom} />}
                     <div className="clip-handle right" onPointerDown={e => beginClipPointer(e, clip, 'trim-end')} />
                   </div>
                 })}
@@ -748,7 +768,7 @@ export default function App() {
       </section>
     </main>
 
-    {timelineMenu && <div ref={timelineMenuRef} className="timeline-context-menu" role="menu" aria-label="Timeline export markers" style={{ left: timelineMenu.x, top: timelineMenu.y }} onContextMenu={event => event.preventDefault()} onKeyDown={event => {
+    {timelineMenu && <div ref={timelineMenuRef} className="timeline-context-menu" role="menu" aria-label={timelineMenu.kind === 'ruler' ? 'Timeline export markers' : 'Shot actions'} tabIndex={-1} style={{ left: timelineMenu.x, top: timelineMenu.y }} onContextMenu={event => event.preventDefault()} onKeyDown={event => {
       if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); setTimelineMenu(null); timelineScroll.current?.focus(); return }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
@@ -757,9 +777,11 @@ export default function App() {
         buttons[(current + (event.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length]?.focus()
       }
     }}>
+      {timelineMenu.kind === 'clip' ? <button role="menuitem" disabled={!canUnlinkAudio} onClick={unlinkAudio}>Unlink Audio</button> : <>
       <button role="menuitem" disabled={!duration || timelineMenu.time >= (exportEnd ?? duration)} onClick={() => { commit(previous => ({ ...previous, exportStart: timelineMenu.time })); setTimelineMenu(null) }}>Mark Export Start</button>
       <button role="menuitem" disabled={!duration || timelineMenu.time <= (exportStart ?? 0)} onClick={() => { commit(previous => ({ ...previous, exportEnd: timelineMenu.time })); setTimelineMenu(null) }}>Mark Export End</button>
       <button role="menuitem" disabled={exportStart === undefined && exportEnd === undefined} onClick={() => { commit(previous => ({ ...previous, exportStart: undefined, exportEnd: undefined })); setTimelineMenu(null) }}>Clear Export Markers</button>
+      </>}
     </div>}
 
     {selectedClip && <div className="selection-status"><Info size={14} /><span><strong>{project.assets.find(a => a.id === selectedClip.assetId)?.name}</strong> · {selectedClip.trackId} · {timecode(selectedClip.start, project.frameRate)} → {timecode(endOf(selectedClip), project.frameRate)}</span><button onClick={() => setShowProperties(true)}>Properties</button><button onClick={() => setSelectedClipId(null)}><X size={14} /></button></div>}

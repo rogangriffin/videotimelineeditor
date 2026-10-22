@@ -1,0 +1,7 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Framecut waveform checks</title>
+<style>body{margin:0;background:#202127;color:#eee;font:14px system-ui}#checks{padding:16px}pre{white-space:pre-wrap}#editor{height:700px}#editor .app-shell{height:700px}#stress{margin:16px;width:600px;max-width:90vw}#stress .timeline-scroll{height:60px;width:100%;overflow:auto}#stress .track-row{height:58px}#stress .timeline-clip{height:45px}</style>
+<div id="checks"><h1>Waveform accuracy and rendering checks</h1><p>Uses generated audio in a temporary test project. Run with a temporary FRAMECUT_DATA_DIR.</p><button id="run">Run waveform checks</button><pre id="results"></pre></div>
+<div id="editor"></div><div id="stress"></div>
+<script type="module" src="/tests/browser-waveforms.tsx"></script>
